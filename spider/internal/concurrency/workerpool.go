@@ -6,6 +6,14 @@ import (
 	"go.uber.org/zap"
 )
 
+type poolState int
+
+const (
+	stateRunning poolState = iota
+	stateStopping
+	stateStopped
+)
+
 // WorkerPool is an implementation of a start/stoppable worker pool.
 //
 // In this implementation, jobs are essentially tokens to perform some work. Jobs are not delivered
@@ -28,6 +36,8 @@ type WorkerPool struct {
 	errors    chan error
 	done      chan bool
 	waitGroup sync.WaitGroup
+	state     poolState
+	stateLock sync.Mutex
 }
 
 // NewWorkerPool creates a new worker-pool
@@ -43,6 +53,7 @@ func NewWorkerPool(logger *zap.Logger, numWorkers int, w Worker) *WorkerPool {
 		errors:    make(chan error),
 		done:      make(chan bool),
 		waitGroup: sync.WaitGroup{},
+		state:     stateStopped,
 	}
 }
 
@@ -53,6 +64,10 @@ func NewWorkerPool(logger *zap.Logger, numWorkers int, w Worker) *WorkerPool {
 // case it stops the ingester-pool, waits for the workers to drain, then signals
 // that it is done.
 func (s *WorkerPool) Start() error {
+	s.stateLock.Lock()
+	s.state = stateRunning
+	s.stateLock.Unlock()
+
 	// Create workers with initial jobs
 	s.waitGroup.Add(s.numWorkers)
 	for i := 0; i < s.numWorkers; i++ {
@@ -64,6 +79,7 @@ func (s *WorkerPool) Start() error {
 	for {
 		select {
 		case err := <-s.errors:
+			s.state = stateStopping
 
 			// If the error is something we don't know about or is not retryable, log it and stop
 			if err != Stopped {
@@ -85,6 +101,7 @@ func (s *WorkerPool) Start() error {
 			close(s.errors)
 			close(s.done)
 
+			s.state = stateStopped
 			return err
 		case <-s.results:
 			// If we get a result, add another job to the queue
@@ -136,6 +153,10 @@ func (s *WorkerPool) Stop() {
 // StopWait starts the process of stopping, and waits for all workers to
 // stop before returning.
 func (s *WorkerPool) StopWait() {
-	s.Stop()
+	s.stateLock.Lock()
+	defer s.stateLock.Unlock()
+	if s.state == stateRunning {
+		s.Stop()
+	}
 	<-s.done
 }
