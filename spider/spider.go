@@ -3,11 +3,11 @@ package spider
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -72,7 +72,6 @@ type Spider struct {
 
 	client *http.Client
 	logger *zap.Logger
-	pool   *concurrency.WorkerPool
 }
 
 // NewSpider creates a new spider with the given options.
@@ -91,21 +90,66 @@ func NewSpider(options ...Option) *Spider {
 	for _, op := range options {
 		op(spider)
 	}
-	spider.pool = concurrency.NewWorkerPool(logger, worker{}, spider.Concurrency)
 	return spider
 }
 
 func (s Spider) Run() error {
+	wg := sync.WaitGroup{}
+	queue := newURLQueue()
+
+	// TODO: const/config this
+	pollInterval := time.Second
+
+	// Add our root to the queue to start us off.
+	queue.Append(s.RootURL)
+	wg.Add(1)
+
+	// Create parent context which sets an overall timeout.
 	ctx, cancel := context.WithTimeout(context.Background(), s.MaxTime)
 	defer cancel()
 
-	first, err := s.request(ctx, s.RootURL)
-	if err != nil {
-		return err
-	}
+	pool := concurrency.NewWorkerPool(s.logger, s.Concurrency, concurrency.WorkFunc(func() error {
+		if !queue.HasItems() {
+			time.Sleep(pollInterval)
+			return nil
+		}
 
-	out, err := parser.ByToken(first)
-	fmt.Println(out, err)
+		next := queue.Next()
+		defer wg.Done()
+		body, err := s.request(ctx, next)
+		if err != nil {
+			// TODO: Maybe make err retryable.
+			return err
+		}
+
+		results, err := parser.ByToken(body)
+		if err != nil {
+			return err
+		}
+
+		// Add all of the links to follow to the queue.
+		for _, link := range results.Links {
+			uri, err := url.Parse(link)
+			if err != nil {
+				s.logger.Info("Skipping invalid url", zap.String("url", link))
+				continue
+			}
+
+			if !s.isExternalURL(uri) && !queue.Seen(uri) {
+				s.logger.Info("Found url to fetch", zap.String("url", link))
+				wg.Add(1)
+				queue.Append(uri)
+			}
+		}
+
+		return nil
+	}))
+
+	go pool.Start()
+
+	// Wait for us to exhaust the queue, then shut down the pool and wait for it to fully drain.
+	wg.Wait()
+	pool.StopWait()
 	return nil
 }
 
@@ -124,6 +168,7 @@ func (s Spider) request(ctx context.Context, uri *url.URL) ([]byte, error) {
 	}
 
 	if res.StatusCode != 200 {
+		s.logger.Info("error fetching", zap.String("url", uri.String()))
 		return nil, errors.New("unexpected status code")
 	}
 

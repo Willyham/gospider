@@ -31,7 +31,7 @@ type WorkerPool struct {
 }
 
 // NewWorkerPool creates a new worker-pool
-func NewWorkerPool(logger *zap.Logger, w Worker, numWorkers int) *WorkerPool {
+func NewWorkerPool(logger *zap.Logger, numWorkers int, w Worker) *WorkerPool {
 	return &WorkerPool{
 		logger:     logger,
 		worker:     w,

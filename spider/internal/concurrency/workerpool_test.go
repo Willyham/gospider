@@ -14,8 +14,8 @@ import (
 
 func TestNewIngesterPool(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
-	ingester := NewWorkerPool(logger, &mocks.Worker{}, 1)
-	assert.Implements(t, (*AsyncRunnable)(nil), ingester)
+	pool := NewWorkerPool(logger, 1, &mocks.Worker{})
+	assert.Implements(t, (*AsyncRunnable)(nil), pool)
 }
 
 func TestStart(t *testing.T) {
@@ -24,12 +24,12 @@ func TestStart(t *testing.T) {
 	worker.On("Work").Return(nil)
 
 	logger, _ := zap.NewDevelopment()
-	ingester := NewWorkerPool(logger, worker, 1)
-	go ingester.Start()
+	pool := NewWorkerPool(logger, 1, worker)
+	go pool.Start()
 	// Advance some time to allow the workers to process a job before stopping
 	select {
 	case <-time.After(1 * time.Millisecond):
-		ingester.StopWait()
+		pool.StopWait()
 	}
 	mock.AssertExpectationsForObjects(t, worker)
 }
@@ -40,9 +40,9 @@ func TestStartError(t *testing.T) {
 	worker.On("Work").Return(assert.AnError)
 
 	logger, _ := zap.NewDevelopment()
-	ingester := NewWorkerPool(logger, worker, 1)
+	pool := NewWorkerPool(logger, 1, worker)
 
-	err := ingester.Start()
+	err := pool.Start()
 	assert.Error(t, err)
 	mock.AssertExpectationsForObjects(t, worker)
 }
@@ -54,9 +54,9 @@ func TestStartMultipleErrors(t *testing.T) {
 
 	// Use 2 workers to cause 2 errors
 	logger, _ := zap.NewDevelopment()
-	ingester := NewWorkerPool(logger, worker, 2)
+	pool := NewWorkerPool(logger, 2, worker)
 
-	err := ingester.Start()
+	err := pool.Start()
 	assert.Error(t, err)
 	mock.AssertExpectationsForObjects(t, worker)
 }
@@ -67,14 +67,14 @@ func TestStartRetryableError(t *testing.T) {
 	worker.On("Work").Return(NewRetryableError(assert.AnError))
 
 	logger, _ := zap.NewDevelopment()
-	ingester := NewWorkerPool(logger, worker, 1)
+	pool := NewWorkerPool(logger, 1, worker)
 
-	go ingester.Start()
+	go pool.Start()
 
 	// Advance some time to allow the workers to process a job before stopping
 	select {
 	case <-time.After(1 * time.Microsecond):
-		ingester.StopWait()
+		pool.StopWait()
 	}
 	mock.AssertExpectationsForObjects(t, worker)
 }
