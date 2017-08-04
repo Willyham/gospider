@@ -2,8 +2,6 @@ package spider
 
 import (
 	"context"
-	"errors"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,6 +12,7 @@ import (
 
 	"github.com/Willyham/gospider/spider/internal/concurrency"
 	"github.com/Willyham/gospider/spider/internal/parser"
+	"github.com/temoto/robotstxt"
 )
 
 func Start(args map[string]interface{}) error {
@@ -50,9 +49,11 @@ func WithDepth(depth int) Option {
 	}
 }
 
-func WithClient(client *http.Client) Option {
+func WithClient(c *http.Client) Option {
 	return func(s *Spider) {
-		s.client = client
+		s.requester = client{
+			client: c,
+		}
 	}
 }
 
@@ -64,8 +65,9 @@ type Spider struct {
 	Concurrency      int
 	RootURL          *url.URL
 
-	client *http.Client
-	logger *zap.Logger
+	requester Requester
+	logger    *zap.Logger
+	robots    *robotstxt.RobotsData
 }
 
 // NewSpider creates a new spider with the given options.
@@ -77,7 +79,9 @@ func NewSpider(options ...Option) *Spider {
 		MaxTime:      time.Minute,
 		IgnoreRobots: false,
 
-		client: http.DefaultClient,
+		requester: client{
+			client: http.DefaultClient,
+		},
 		logger: logger,
 	}
 	for _, op := range options {
@@ -89,6 +93,14 @@ func NewSpider(options ...Option) *Spider {
 func (s Spider) Run() error {
 	wg := sync.WaitGroup{}
 	queue := newURLQueue()
+
+	if s.robots == nil && !s.IgnoreRobots {
+		robots, err := s.readRobotsData(s.RootURL)
+		if err != nil {
+			return err
+		}
+		s.robots = robots
+	}
 
 	// TODO: const/config this
 	pollInterval := time.Second
@@ -109,7 +121,7 @@ func (s Spider) Run() error {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 		defer cancel()
 
-		body, err := s.request(ctx, next)
+		body, err := s.requester.Request(ctx, next)
 		if err != nil {
 			// TODO: Maybe make err retryable.
 			return err
@@ -139,30 +151,22 @@ func (s Spider) Run() error {
 	return nil
 }
 
-func (s Spider) request(ctx context.Context, uri *url.URL) ([]byte, error) {
-	if uri == nil {
-		return nil, errors.New("must provide uri to request")
-	}
+var robotsTxt, _ = url.Parse("/robots.txt")
 
-	// Ignore this error as it's not possible to trigger with a valid URL and a constant method.
-	req, _ := http.NewRequest(http.MethodGet, uri.String(), nil)
+func (s Spider) readRobotsData(root *url.URL) (*robotstxt.RobotsData, error) {
+	robotsURL := root.ResolveReference(robotsTxt)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
 
-	req = req.WithContext(ctx)
-	res, err := s.client.Do(req)
+	res, err := s.requester.Request(ctx, robotsURL)
 	if err != nil {
+		httpErr, ok := err.(httpResponseError)
+		if ok {
+			return robotstxt.FromStatusAndBytes(httpErr.statusCode, res)
+		}
 		return nil, err
 	}
-
-	if res.StatusCode != 200 {
-		s.logger.Info("error fetching", zap.String("url", uri.String()))
-		return nil, errors.New("unexpected status code")
-	}
-
-	data, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
+	return robotstxt.FromBytes(res)
 }
 
 // filterURLsToAdd determines which URLs should be added to the queue for fetching.

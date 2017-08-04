@@ -1,16 +1,25 @@
 package spider
 
 import (
-	"context"
-	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"testing"
 
+	"github.com/Willyham/gospider/spider/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+type errTripper struct{}
+
+func (c errTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, assert.AnError
+}
+
+var blackholeClient = &http.Client{
+	Transport: errTripper{},
+}
 
 func TestIsExternalURL(t *testing.T) {
 	testURL, err := url.Parse("http://willdemaine.co.uk")
@@ -44,41 +53,6 @@ func TestIsExternalURL(t *testing.T) {
 	}
 }
 
-func TestRequest(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "Foo")
-	}))
-	defer server.Close()
-
-	uri, err := url.Parse(server.URL)
-	require.NoError(t, err)
-
-	spider := NewSpider(WithClient(http.DefaultClient))
-	res, err := spider.request(context.Background(), uri)
-	assert.NoError(t, err)
-	assert.Equal(t, []byte("Foo"), res)
-}
-
-func TestRequestNoURI(t *testing.T) {
-	spider := NewSpider()
-	_, err := spider.request(context.Background(), nil)
-	assert.Error(t, err)
-}
-
-func TestRequestError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(500)
-	}))
-	defer server.Close()
-
-	uri, err := url.Parse(server.URL)
-	require.NoError(t, err)
-
-	spider := NewSpider(WithClient(http.DefaultClient))
-	_, err = spider.request(context.Background(), uri)
-	assert.Error(t, err)
-}
-
 func TestFilterURLsToAdd(t *testing.T) {
 	root, err := url.Parse("http://willdemaine.co.uk")
 	require.NoError(t, err)
@@ -107,4 +81,66 @@ func TestFilterURLsToAdd(t *testing.T) {
 			assert.Equal(t, test.expected, s.filterURLsToAdd(test.input, test.seener))
 		})
 	}
+}
+
+var willydURL, _ = url.Parse("http://willdemaine.co.uk")
+var willydRobots, _ = url.Parse("http://willdemaine.co.uk/robots.txt")
+
+func TestReadRobotsData(t *testing.T) {
+	requester := &mocks.Requester{}
+	requester.On("Request", mock.Anything, willydRobots).Return([]byte(`
+		User-agent: *
+		Disallow: /foo/
+		Disallow: /bar/
+	`), nil)
+
+	s := NewSpider(WithClient(blackholeClient))
+	s.requester = requester
+
+	data, err := s.readRobotsData(willydURL)
+	assert.NoError(t, err)
+	assert.True(t, data.TestAgent("/", "Agent"))
+	assert.False(t, data.TestAgent("/foo/a", "Agent"))
+	assert.False(t, data.TestAgent("/bar/a", "Agent"))
+	assert.True(t, data.TestAgent("/foo", "Agent"))
+	assert.True(t, data.TestAgent("/asdf", "Agent"))
+}
+
+func TestReadRobotsDataHTTPError(t *testing.T) {
+	requester := &mocks.Requester{}
+	requester.On("Request", mock.Anything, willydRobots).Return([]byte{}, httpResponseError{
+		statusCode: 500,
+	})
+
+	s := NewSpider(WithClient(blackholeClient))
+	s.requester = requester
+
+	data, err := s.readRobotsData(willydURL)
+	assert.NoError(t, err)
+	assert.False(t, data.TestAgent("/", "Foo"))
+}
+
+func TestReadRobotsDataError(t *testing.T) {
+	requester := &mocks.Requester{}
+	requester.On("Request", mock.Anything, willydRobots).Return([]byte{}, assert.AnError)
+
+	s := NewSpider(WithClient(blackholeClient))
+	s.requester = requester
+
+	_, err := s.readRobotsData(willydURL)
+	assert.Error(t, err)
+}
+
+func TestReadRobotsDataMissing(t *testing.T) {
+	requester := &mocks.Requester{}
+	requester.On("Request", mock.Anything, willydRobots).Return([]byte{}, httpResponseError{
+		statusCode: 404,
+	})
+
+	s := NewSpider()
+	s.requester = requester
+
+	data, err := s.readRobotsData(willydURL)
+	assert.NoError(t, err)
+	assert.True(t, data.TestAgent("/", "Foo"))
 }

@@ -1,5 +1,5 @@
-hash: eef97ba1a805e60377d77fdb5dbff64c8837f471a43aea3b7282452ac3b43cd7
-updated: 2017-08-03T14:05:09.846803104+01:00
+hash: 94c6e140b9f3ed7b1ae632b2abdeea4b654b296eeb3023f662235628f6b06618
+updated: 2017-08-04T16:12:03.428887096+01:00
 imports:
 - name: github.com/davecgh/go-spew
   version: 6d212800a42e8ab5c146b8ace3490ee17e5225f9
@@ -58,6 +58,8 @@ imports:
   - assert
   - mock
   - require
+- name: github.com/temoto/robotstxt
+  version: 9e4646fa705336d5b2fa9dddfafbe0a1a965acd7
 - name: go.uber.org/atomic
   version: 4e336646b2ef9fc6e47be8e21594178f98e5ebcf
 - name: go.uber.org/multierr
