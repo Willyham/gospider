@@ -21,8 +21,8 @@ const (
 	AttrSrc  = "src"
 )
 
-// ParseResults encapsulates data we want out of the parser.
-type ParseResults struct {
+// Results encapsulates data we want out of the parser.
+type Results struct {
 	Assets []string
 	Links  []string
 }
@@ -30,21 +30,21 @@ type ParseResults struct {
 // Parser allows for different parser implementations.
 // For example, it may be possible to get a speed increase at the expense of accuracy by using regex.
 type Parser interface {
-	Parse([]byte) (ParseResults, error)
+	Parse([]byte) (Results, error)
 }
 
 // Func describes the parser function.
-type Func func([]byte) (ParseResults, error)
+type Func func([]byte) (Results, error)
 
 // Parse adapts func to the Parser interface.
-func (f Func) Parse(body []byte) (ParseResults, error) {
+func (f Func) Parse(body []byte) (Results, error) {
 	return f(body)
 }
 
 // ByToken iterates over tokens in the response, pulling out links and assets.
-var ByToken = Func(func(body []byte) (ParseResults, error) {
+var ByToken = Func(func(body []byte) (Results, error) {
 	tokenizer := html.NewTokenizer(bytes.NewReader(body))
-	results := ParseResults{}
+	results := Results{}
 	for {
 		tokenType := tokenizer.Next()
 		switch tokenType {

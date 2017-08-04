@@ -44,12 +44,6 @@ func WithIgnoreRobots(ignore bool) Option {
 	}
 }
 
-func WithFollowSubdomains(follow bool) Option {
-	return func(s *Spider) {
-		s.FollowSubdomains = follow
-	}
-}
-
 func WithDepth(depth int) Option {
 	return func(s *Spider) {
 		s.MaxDepth = depth
@@ -78,11 +72,10 @@ type Spider struct {
 func NewSpider(options ...Option) *Spider {
 	logger, _ := zap.NewProduction()
 	spider := &Spider{
-		MaxDepth:         2,
-		Concurrency:      4,
-		MaxTime:          time.Minute,
-		FollowSubdomains: false,
-		IgnoreRobots:     false,
+		MaxDepth:     2,
+		Concurrency:  4,
+		MaxTime:      time.Minute,
+		IgnoreRobots: false,
 
 		client: http.DefaultClient,
 		logger: logger,
@@ -104,10 +97,6 @@ func (s Spider) Run() error {
 	queue.Append(s.RootURL)
 	wg.Add(1)
 
-	// Create parent context which sets an overall timeout.
-	ctx, cancel := context.WithTimeout(context.Background(), s.MaxTime)
-	defer cancel()
-
 	pool := concurrency.NewWorkerPool(s.logger, s.Concurrency, concurrency.WorkFunc(func() error {
 		if !queue.HasItems() {
 			time.Sleep(pollInterval)
@@ -116,6 +105,10 @@ func (s Spider) Run() error {
 
 		next := queue.Next()
 		defer wg.Done()
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+		defer cancel()
+
 		body, err := s.request(ctx, next)
 		if err != nil {
 			// TODO: Maybe make err retryable.
@@ -128,18 +121,11 @@ func (s Spider) Run() error {
 		}
 
 		// Add all of the links to follow to the queue.
-		for _, link := range results.Links {
-			uri, err := url.Parse(link)
-			if err != nil {
-				s.logger.Info("Skipping invalid url", zap.String("url", link))
-				continue
-			}
-
-			if !s.isExternalURL(uri) && !queue.Seen(uri) {
-				s.logger.Info("Found url to fetch", zap.String("url", link))
-				wg.Add(1)
-				queue.Append(uri)
-			}
+		toAdd := s.filterURLsToAdd(results.Links, queue)
+		for _, link := range toAdd {
+			s.logger.Info("Found url to fetch", zap.String("url", link.String()))
+			wg.Add(1)
+			queue.Append(link)
 		}
 
 		return nil
@@ -177,6 +163,23 @@ func (s Spider) request(ctx context.Context, uri *url.URL) ([]byte, error) {
 		return nil, err
 	}
 	return data, nil
+}
+
+// filterURLsToAdd determines which URLs should be added to the queue for fetching.
+func (s Spider) filterURLsToAdd(urls []string, seener Seener) []*url.URL {
+	results := make([]*url.URL, 0, len(urls))
+	for _, link := range urls {
+		uri, err := url.Parse(link)
+		if err != nil {
+			s.logger.Info("Skipping invalid url", zap.String("url", link))
+			continue
+		}
+
+		if !s.isExternalURL(uri) && !seener.Seen(uri) {
+			results = append(results, uri)
+		}
+	}
+	return results
 }
 
 // isExternalURL determines if the URL should be counted as 'external'.

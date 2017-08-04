@@ -23,6 +23,7 @@ func TestIsExternalURL(t *testing.T) {
 		expected  bool
 	}{
 		{"same host", "http://willdemaine.co.uk", false, false},
+		{"path", "http://willdemaine.co.uk/foo", false, false},
 		{"subdomain follow", "http://foo.willdemaine.co.uk", true, false},
 		{"subdomain no follow", "http://foo.willdemaine.co.uk", false, true},
 		{"external", "http://foo.bar.co.uk", false, true},
@@ -76,4 +77,34 @@ func TestRequestError(t *testing.T) {
 	spider := NewSpider(WithClient(http.DefaultClient))
 	_, err = spider.request(context.Background(), uri)
 	assert.Error(t, err)
+}
+
+func TestFilterURLsToAdd(t *testing.T) {
+	root, err := url.Parse("http://willdemaine.co.uk")
+	require.NoError(t, err)
+	path1, err := url.Parse("http://willdemaine.co.uk/foo")
+	require.NoError(t, err)
+
+	cases := []struct {
+		name     string
+		input    []string
+		expected []*url.URL
+		seener   Seener
+	}{
+		{"empty", []string{}, []*url.URL{}, &urlQueue{}},
+		{"invalid", []string{":"}, []*url.URL{}, &urlQueue{}},
+		{"valid not seen", []string{"http://willdemaine.co.uk/foo"}, []*url.URL{path1}, &urlQueue{}},
+		{"valid and seen", []string{"http://willdemaine.co.uk/foo"}, []*url.URL{}, &urlQueue{
+			seen: map[string]bool{
+				"http://willdemaine.co.uk/foo": true,
+			},
+		}},
+	}
+
+	s := NewSpider(WithRoot(root))
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, s.filterURLsToAdd(test.input, test.seener))
+		})
+	}
 }

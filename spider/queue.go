@@ -5,6 +5,10 @@ import (
 	"sync"
 )
 
+type Seener interface {
+	Seen(*url.URL) bool
+}
+
 type urlQueue struct {
 	urls []*url.URL
 	seen map[string]bool
