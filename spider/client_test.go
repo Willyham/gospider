@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"testing"
 
+	"go.uber.org/zap"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,6 +25,7 @@ func TestRequest(t *testing.T) {
 
 	c := client{
 		client: http.DefaultClient,
+		logger: zap.NewNop(),
 	}
 	res, err := c.Request(context.Background(), uri)
 	assert.NoError(t, err)
@@ -32,6 +35,7 @@ func TestRequest(t *testing.T) {
 func TestRequestNoURI(t *testing.T) {
 	c := client{
 		client: http.DefaultClient,
+		logger: zap.NewNop(),
 	}
 	_, err := c.Request(context.Background(), nil)
 	assert.Error(t, err)
@@ -48,6 +52,7 @@ func TestRequestError(t *testing.T) {
 
 	c := client{
 		client: http.DefaultClient,
+		logger: zap.NewNop(),
 	}
 	_, err = c.Request(context.Background(), uri)
 	assert.Error(t, err)

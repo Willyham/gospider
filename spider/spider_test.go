@@ -2,7 +2,6 @@ package spider
 
 import (
 	"net/url"
-	"sync"
 	"testing"
 
 	"github.com/Willyham/gospider/spider/internal/concurrency"
@@ -34,10 +33,8 @@ func TestIsExternalURL(t *testing.T) {
 
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			s := Spider{
-				rootURL:          testURL,
-				FollowSubdomains: test.followSub,
-			}
+			s := New(WithRoot(testURL))
+			s.FollowSubdomains = test.followSub
 
 			parsed, err := url.Parse(test.uri)
 			require.NoError(t, err)
@@ -135,9 +132,9 @@ func TestReadRobotsDataMissing(t *testing.T) {
 }
 
 func TestWorkerNoItems(t *testing.T) {
-	s := New()
-	worker := s.createWorker(newURLQueue(), &sync.WaitGroup{})
-	err := worker()
+	s := New(WithRoot(willydURL))
+	s.wg.Add(1)
+	err := s.work()
 	assert.NoError(t, err)
 }
 
@@ -151,18 +148,16 @@ func TestWorker(t *testing.T) {
 		WithRoot(willydURL),
 		WithRequester(requester),
 		WithConcurrency(1),
+		WithIgnoreRobots(false),
 	)
+	s.queue.Append(willydURL)
 
-	queue := newURLQueue()
-	queue.Append(willydURL)
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-
-	worker := s.createWorker(queue, wg)
-	err := worker()
+	s.wg.Add(1)
+	err := s.work()
 	assert.NoError(t, err)
 
-	assert.Len(t, queue.urls, 1)
+	assert.Len(t, s.queue.urls, 1)
+	assert.Equal(t, "http://willdemaine.co.uk/foo/bar", s.queue.urls[0].String())
 }
 
 func TestWorkerRequestError(t *testing.T) {
@@ -171,25 +166,69 @@ func TestWorkerRequestError(t *testing.T) {
 		statusCode: 500,
 	})
 
-	s := New(WithRequester(requester))
+	s := New(WithRoot(willydURL), WithRequester(requester))
+	s.queue.Append(willydURL)
 
-	queue := newURLQueue()
-	queue.Append(willydURL)
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-
-	worker := s.createWorker(queue, wg)
-	err := worker()
+	s.wg.Add(1)
+	err := s.work()
 	assert.Error(t, err)
 }
 
 func TestRun(t *testing.T) {
+	requester := &mocks.Requester{}
+	requester.On("Request", mock.Anything, willydURL).Return([]byte("foo"), nil)
+
 	s := New(
 		WithRoot(willydURL),
 		WithConcurrency(1),
+		WithRequester(requester),
+		WithIgnoreRobots(true), // So we don't request robots.txt
 	)
+
 	s.worker = concurrency.WorkFunc(func() error {
+		if !s.queue.HasItems() {
+			return nil
+		}
+		defer s.wg.Done()
+		_ = s.queue.Next()
 		return nil
 	})
 	err := s.Run()
+	assert.NoError(t, err)
+}
+
+func TestRunRobots(t *testing.T) {
+	requester := &mocks.Requester{}
+	requester.On("Request", mock.Anything, willydRobots).Return([]byte("foo"), nil)
+	requester.On("Request", mock.Anything, willydURL).Return([]byte("foo"), nil)
+
+	s := New(
+		WithRoot(willydURL),
+		WithConcurrency(1),
+		WithRequester(requester),
+	)
+
+	s.worker = concurrency.WorkFunc(func() error {
+		if !s.queue.HasItems() {
+			return nil
+		}
+		defer s.wg.Done()
+		_ = s.queue.Next()
+		return nil
+	})
+	err := s.Run()
+	assert.NoError(t, err)
+}
+
+func TestRunRobotsError(t *testing.T) {
+	requester := &mocks.Requester{}
+	requester.On("Request", mock.Anything, willydRobots).Return(nil, assert.AnError)
+
+	s := New(
+		WithRoot(willydURL),
+		WithConcurrency(1),
+		WithRequester(requester),
+	)
+	err := s.Run()
+	assert.Error(t, err)
 }

@@ -61,10 +61,12 @@ type Spider struct {
 	concurrency      int
 	rootURL          *url.URL
 
-	requester     Requester
-	logger        *zap.Logger
-	robots        *robotstxt.RobotsData
-	workerFactory workerFactory
+	requester Requester
+	worker    concurrency.Worker
+	logger    *zap.Logger
+	robots    *robotstxt.RobotsData
+	queue     *urlQueue
+	wg        sync.WaitGroup
 }
 
 // New creates a new spider with the given options.
@@ -73,12 +75,16 @@ func New(options ...Option) *Spider {
 	spider := &Spider{
 		concurrency:  4,
 		ignoreRobots: false,
-
 		requester: client{
+			logger: logger,
 			client: http.DefaultClient,
 		},
 		logger: logger,
+		queue:  newURLQueue(),
 	}
+	// Default to spider.work, but allow this to be overridden for testing
+	// by having worker as a field on the Spider struct.
+	spider.worker = concurrency.WorkFunc((*spider).work)
 	for _, op := range options {
 		op(spider)
 	}
@@ -87,7 +93,7 @@ func New(options ...Option) *Spider {
 
 // Run the spider. Start at the root and follow all valid URLs, building a map
 // of the site.
-func (s Spider) Run() error {
+func (s *Spider) Run() error {
 	if s.robots == nil && !s.ignoreRobots {
 		robots, err := s.readRobotsData(s.rootURL)
 		if err != nil {
@@ -96,17 +102,15 @@ func (s Spider) Run() error {
 		s.robots = robots
 	}
 
-	wg := &sync.WaitGroup{}
-	queue := newURLQueue()
 	// Add our root to the queue to start us off.
-	queue.Append(s.rootURL)
-	wg.Add(1)
+	s.queue.Append(s.rootURL)
+	s.wg.Add(1)
 
-	pool := concurrency.NewWorkerPool(s.logger, s.concurrency, s.createWorker(queue, wg))
+	pool := concurrency.NewWorkerPool(s.logger, s.concurrency, s.worker)
 	go pool.Start()
 
-	// Wait for us to exhaust the queue, then shut down the pool and wait for it to fully drain.
-	wg.Wait()
+	// Wait until we're done with all work, the drain the pool too.
+	s.wg.Wait()
 	pool.StopWait()
 	return nil
 }
@@ -115,46 +119,46 @@ type workerFactory func(queue *urlQueue, wg *sync.WaitGroup) concurrency.WorkFun
 
 // createWorker creates the worker used in the worker pool. Each worker will poll the URL queue
 // for items. If a URL is found, it will collect the links/assets for the URL and report them.
-func (s Spider) createWorker(queue *urlQueue, wg *sync.WaitGroup) concurrency.WorkFunc {
-	return func() error {
-		if !queue.HasItems() {
-			time.Sleep(workerPollInterval)
-			return nil
-		}
-
-		next := queue.Next()
-		defer wg.Done()
-
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-		defer cancel()
-
-		body, err := s.requester.Request(ctx, next)
-		if err != nil {
-			// TODO: Maybe make err retryable.
-			return err
-		}
-
-		results, err := parser.ByToken(body)
-		if err != nil {
-			return err
-		}
-
-		// Add all of the links to follow to the queue.
-		toAdd := s.filterURLsToAdd(results.Links, queue)
-		for _, link := range toAdd {
-			s.logger.Info("Found url to fetch", zap.String("url", link.String()))
-			wg.Add(1)
-			queue.Append(link)
-		}
-
+func (s *Spider) work() error {
+	if !s.queue.HasItems() {
+		time.Sleep(workerPollInterval)
 		return nil
 	}
+
+	next := s.queue.Next()
+	defer s.wg.Done()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	body, err := s.requester.Request(ctx, next)
+	if err != nil {
+		// TODO: Maybe make err retryable.
+		return err
+	}
+
+	results, err := parser.ByToken(body)
+	if err != nil {
+		return err
+	}
+
+	// Add all of the links to follow to the queue.
+	s.logger.Info("Found links", zap.Int("links", len(results.Links)))
+	toAdd := s.filterURLsToAdd(results.Links, s.queue)
+	for _, link := range toAdd {
+		fullPath := s.rootURL.ResolveReference(link)
+		s.logger.Info("Enqueing link to fetch", zap.String("url", fullPath.String()))
+		s.queue.Append(s.rootURL.ResolveReference(fullPath))
+		s.wg.Add(1)
+	}
+
+	return nil
 }
 
 // readRobotsData makes a request to the root + /robots.txt and parses the data.
 // In the event of a 4XX, we assume crawling is allowed. In the event of a 5XX,
 // we assume it is disallowed.
-func (s Spider) readRobotsData(root *url.URL) (*robotstxt.RobotsData, error) {
+func (s *Spider) readRobotsData(root *url.URL) (*robotstxt.RobotsData, error) {
 	robotsURL := root.ResolveReference(robotsTxt)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
@@ -171,7 +175,7 @@ func (s Spider) readRobotsData(root *url.URL) (*robotstxt.RobotsData, error) {
 }
 
 // filterURLsToAdd determines which URLs should be added to the queue for fetching.
-func (s Spider) filterURLsToAdd(urls []string, seener Seener) []*url.URL {
+func (s *Spider) filterURLsToAdd(urls []string, seener Seener) []*url.URL {
 	results := make([]*url.URL, 0, len(urls))
 	for _, link := range urls {
 		uri, err := url.Parse(link)
@@ -191,7 +195,7 @@ func (s Spider) filterURLsToAdd(urls []string, seener Seener) []*url.URL {
 // If the URL has no scheme and host, it's a relative one.
 // In the case that we want to follow subdomains, we check the suffix of the host,
 // otherwise, we check the exact host.
-func (s Spider) isExternalURL(input *url.URL) bool {
+func (s *Spider) isExternalURL(input *url.URL) bool {
 	if input.Scheme == "" && input.Hostname() == "" {
 		return false
 	}

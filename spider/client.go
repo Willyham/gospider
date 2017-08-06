@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+
+	"go.uber.org/zap"
 )
 
 type httpResponseError struct {
@@ -26,6 +28,7 @@ type Requester interface {
 
 type client struct {
 	client *http.Client
+	logger *zap.Logger
 }
 
 func (c client) Request(ctx context.Context, uri *url.URL) ([]byte, error) {
@@ -33,14 +36,13 @@ func (c client) Request(ctx context.Context, uri *url.URL) ([]byte, error) {
 		return nil, errors.New("must provide uri to request")
 	}
 
+	c.logger.Info("Fetching URL", zap.String("url", uri.String()))
 	// Ignore this error as it's not possible to trigger with a valid URL and a constant method.
 	req, _ := http.NewRequest(http.MethodGet, uri.String(), nil)
 	req = req.WithContext(ctx)
 	res, err := c.client.Do(req)
 	if err != nil {
-		return nil, httpResponseError{
-			statusCode: res.StatusCode,
-		}
+		return nil, err
 	}
 
 	if res.StatusCode != 200 {

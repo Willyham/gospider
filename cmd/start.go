@@ -21,6 +21,8 @@
 package cmd
 
 import (
+	"log"
+
 	"github.com/Willyham/gospider/spider"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -41,7 +43,11 @@ var startCmd = &cobra.Command{
 			spider.WithIgnoreRobots(conf.IgnoreRobots),
 		)
 
-		return spider.Run()
+		err = spider.Run()
+		if err != nil {
+			log.Fatal("error running spider: ", err)
+		}
+		return nil
 	},
 }
 
