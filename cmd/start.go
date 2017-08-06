@@ -21,8 +21,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/Willyham/gospider/spider"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -32,11 +30,18 @@ import (
 var startCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the spider",
-	Run: func(cmd *cobra.Command, args []string) {
-		err := spider.Start(viper.AllSettings())
+	RunE: func(cmd *cobra.Command, args []string) error {
+		conf, err := NewConfig(viper.AllSettings())
 		if err != nil {
-			fmt.Println(err)
+			return err
 		}
+
+		spider := spider.New(
+			spider.WithRoot(conf.RootURL),
+			spider.WithIgnoreRobots(conf.IgnoreRobots),
+		)
+
+		return spider.Run()
 	},
 }
 

@@ -150,6 +150,12 @@ func (s *WorkerPool) Stop() {
 	s.errors <- Stopped
 }
 
+func (s *WorkerPool) UntilPoolExhausted() {
+	s.waitGroup.Wait()
+	s.StopWait()
+	return
+}
+
 // StopWait starts the process of stopping, and waits for all workers to
 // stop before returning.
 func (s *WorkerPool) StopWait() {

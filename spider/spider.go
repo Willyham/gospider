@@ -15,69 +15,64 @@ import (
 	"github.com/temoto/robotstxt"
 )
 
-func Start(args map[string]interface{}) error {
-	conf, err := NewConfig(args)
-	if err != nil {
-		return err
-	}
+const (
+	workerPollInterval = time.Millisecond * 100
+)
 
-	spider := NewSpider(
-		WithRoot(conf.RootURL),
-		WithIgnoreRobots(conf.IgnoreRobots),
-	)
+var robotsTxt, _ = url.Parse("/robots.txt")
 
-	return spider.Run()
-}
-
+// Option is a function that configures the spider.
 type Option func(*Spider)
 
+// WithRoot sets the rootURL for the spider.
 func WithRoot(root *url.URL) Option {
 	return func(s *Spider) {
-		s.RootURL = root
+		s.rootURL = root
 	}
 }
 
+// WithIgnoreRobots sets whether or not the spider should ignore
+// the robots.txt data.
 func WithIgnoreRobots(ignore bool) Option {
 	return func(s *Spider) {
-		s.IgnoreRobots = ignore
+		s.ignoreRobots = ignore
 	}
 }
 
-func WithDepth(depth int) Option {
+// WithConcurrency sets how many workers will request urls concurrently.
+func WithConcurrency(con int) Option {
 	return func(s *Spider) {
-		s.MaxDepth = depth
+		s.concurrency = con
 	}
 }
 
-func WithClient(c *http.Client) Option {
+// WithRequester sets the requester that the spider should use to make requests.
+func WithRequester(req Requester) Option {
 	return func(s *Spider) {
-		s.requester = client{
-			client: c,
-		}
+		s.requester = req
 	}
 }
 
+// Spider can run requests against a URI until it sees every internal page on that site
+// at least once. It can be configued with Option arguments which override defaults.
 type Spider struct {
-	IgnoreRobots     bool
+	ignoreRobots     bool
 	FollowSubdomains bool
-	MaxDepth         int
-	MaxTime          time.Duration
-	Concurrency      int
-	RootURL          *url.URL
+	concurrency      int
+	rootURL          *url.URL
 
-	requester Requester
-	logger    *zap.Logger
-	robots    *robotstxt.RobotsData
+	requester     Requester
+	logger        *zap.Logger
+	robots        *robotstxt.RobotsData
+	workerFactory workerFactory
 }
 
-// NewSpider creates a new spider with the given options.
-func NewSpider(options ...Option) *Spider {
+// New creates a new spider with the given options.
+func New(options ...Option) *Spider {
 	logger, _ := zap.NewProduction()
 	spider := &Spider{
-		MaxDepth:     2,
-		Concurrency:  4,
-		MaxTime:      time.Minute,
-		IgnoreRobots: false,
+		concurrency:  4,
+		ignoreRobots: false,
 
 		requester: client{
 			client: http.DefaultClient,
@@ -90,28 +85,40 @@ func NewSpider(options ...Option) *Spider {
 	return spider
 }
 
+// Run the spider. Start at the root and follow all valid URLs, building a map
+// of the site.
 func (s Spider) Run() error {
-	wg := sync.WaitGroup{}
-	queue := newURLQueue()
-
-	if s.robots == nil && !s.IgnoreRobots {
-		robots, err := s.readRobotsData(s.RootURL)
+	if s.robots == nil && !s.ignoreRobots {
+		robots, err := s.readRobotsData(s.rootURL)
 		if err != nil {
 			return err
 		}
 		s.robots = robots
 	}
 
-	// TODO: const/config this
-	pollInterval := time.Second
-
+	wg := &sync.WaitGroup{}
+	queue := newURLQueue()
 	// Add our root to the queue to start us off.
-	queue.Append(s.RootURL)
+	queue.Append(s.rootURL)
 	wg.Add(1)
 
-	pool := concurrency.NewWorkerPool(s.logger, s.Concurrency, concurrency.WorkFunc(func() error {
+	pool := concurrency.NewWorkerPool(s.logger, s.concurrency, s.createWorker(queue, wg))
+	go pool.Start()
+
+	// Wait for us to exhaust the queue, then shut down the pool and wait for it to fully drain.
+	wg.Wait()
+	pool.StopWait()
+	return nil
+}
+
+type workerFactory func(queue *urlQueue, wg *sync.WaitGroup) concurrency.WorkFunc
+
+// createWorker creates the worker used in the worker pool. Each worker will poll the URL queue
+// for items. If a URL is found, it will collect the links/assets for the URL and report them.
+func (s Spider) createWorker(queue *urlQueue, wg *sync.WaitGroup) concurrency.WorkFunc {
+	return func() error {
 		if !queue.HasItems() {
-			time.Sleep(pollInterval)
+			time.Sleep(workerPollInterval)
 			return nil
 		}
 
@@ -141,18 +148,12 @@ func (s Spider) Run() error {
 		}
 
 		return nil
-	}))
-
-	go pool.Start()
-
-	// Wait for us to exhaust the queue, then shut down the pool and wait for it to fully drain.
-	wg.Wait()
-	pool.StopWait()
-	return nil
+	}
 }
 
-var robotsTxt, _ = url.Parse("/robots.txt")
-
+// readRobotsData makes a request to the root + /robots.txt and parses the data.
+// In the event of a 4XX, we assume crawling is allowed. In the event of a 5XX,
+// we assume it is disallowed.
 func (s Spider) readRobotsData(root *url.URL) (*robotstxt.RobotsData, error) {
 	robotsURL := root.ResolveReference(robotsTxt)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
@@ -187,11 +188,15 @@ func (s Spider) filterURLsToAdd(urls []string, seener Seener) []*url.URL {
 }
 
 // isExternalURL determines if the URL should be counted as 'external'.
+// If the URL has no scheme and host, it's a relative one.
 // In the case that we want to follow subdomains, we check the suffix of the host,
 // otherwise, we check the exact host.
 func (s Spider) isExternalURL(input *url.URL) bool {
-	if s.FollowSubdomains {
-		return !strings.HasSuffix(input.Hostname(), s.RootURL.Hostname())
+	if input.Scheme == "" && input.Hostname() == "" {
+		return false
 	}
-	return input.Hostname() != s.RootURL.Hostname()
+	if s.FollowSubdomains {
+		return !strings.HasSuffix(input.Hostname(), s.rootURL.Hostname())
+	}
+	return input.Hostname() != s.rootURL.Hostname()
 }

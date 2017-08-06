@@ -5,10 +5,13 @@ import (
 	"sync"
 )
 
+// Seener is something which can check if a URL has ever been seen.
 type Seener interface {
 	Seen(*url.URL) bool
 }
 
+// urlQueue is a structure which maintains a queue of URLs.
+// it also records a list of all URLs seen and implements the Seener interface.
 type urlQueue struct {
 	urls []*url.URL
 	seen map[string]bool

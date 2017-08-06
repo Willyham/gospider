@@ -1,25 +1,16 @@
 package spider
 
 import (
-	"net/http"
 	"net/url"
+	"sync"
 	"testing"
 
+	"github.com/Willyham/gospider/spider/internal/concurrency"
 	"github.com/Willyham/gospider/spider/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
-
-type errTripper struct{}
-
-func (c errTripper) RoundTrip(*http.Request) (*http.Response, error) {
-	return nil, assert.AnError
-}
-
-var blackholeClient = &http.Client{
-	Transport: errTripper{},
-}
 
 func TestIsExternalURL(t *testing.T) {
 	testURL, err := url.Parse("http://willdemaine.co.uk")
@@ -31,6 +22,8 @@ func TestIsExternalURL(t *testing.T) {
 		followSub bool
 		expected  bool
 	}{
+		{"local", "/foo", true, false},
+		{"local no /", "foo", true, false},
 		{"same host", "http://willdemaine.co.uk", false, false},
 		{"path", "http://willdemaine.co.uk/foo", false, false},
 		{"subdomain follow", "http://foo.willdemaine.co.uk", true, false},
@@ -42,7 +35,7 @@ func TestIsExternalURL(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			s := Spider{
-				RootURL:          testURL,
+				rootURL:          testURL,
 				FollowSubdomains: test.followSub,
 			}
 
@@ -75,7 +68,7 @@ func TestFilterURLsToAdd(t *testing.T) {
 		}},
 	}
 
-	s := NewSpider(WithRoot(root))
+	s := New(WithRoot(root))
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			assert.Equal(t, test.expected, s.filterURLsToAdd(test.input, test.seener))
@@ -94,8 +87,7 @@ func TestReadRobotsData(t *testing.T) {
 		Disallow: /bar/
 	`), nil)
 
-	s := NewSpider(WithClient(blackholeClient))
-	s.requester = requester
+	s := New(WithRequester(requester))
 
 	data, err := s.readRobotsData(willydURL)
 	assert.NoError(t, err)
@@ -112,8 +104,7 @@ func TestReadRobotsDataHTTPError(t *testing.T) {
 		statusCode: 500,
 	})
 
-	s := NewSpider(WithClient(blackholeClient))
-	s.requester = requester
+	s := New(WithRequester(requester))
 
 	data, err := s.readRobotsData(willydURL)
 	assert.NoError(t, err)
@@ -124,8 +115,7 @@ func TestReadRobotsDataError(t *testing.T) {
 	requester := &mocks.Requester{}
 	requester.On("Request", mock.Anything, willydRobots).Return([]byte{}, assert.AnError)
 
-	s := NewSpider(WithClient(blackholeClient))
-	s.requester = requester
+	s := New(WithRequester(requester))
 
 	_, err := s.readRobotsData(willydURL)
 	assert.Error(t, err)
@@ -137,10 +127,69 @@ func TestReadRobotsDataMissing(t *testing.T) {
 		statusCode: 404,
 	})
 
-	s := NewSpider()
-	s.requester = requester
+	s := New(WithRequester(requester))
 
 	data, err := s.readRobotsData(willydURL)
 	assert.NoError(t, err)
 	assert.True(t, data.TestAgent("/", "Foo"))
+}
+
+func TestWorkerNoItems(t *testing.T) {
+	s := New()
+	worker := s.createWorker(newURLQueue(), &sync.WaitGroup{})
+	err := worker()
+	assert.NoError(t, err)
+}
+
+func TestWorker(t *testing.T) {
+	requester := &mocks.Requester{}
+	requester.On("Request", mock.Anything, willydURL).Return([]byte(`
+		<a href="/foo/bar"></a>
+	`), nil)
+
+	s := New(
+		WithRoot(willydURL),
+		WithRequester(requester),
+		WithConcurrency(1),
+	)
+
+	queue := newURLQueue()
+	queue.Append(willydURL)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+
+	worker := s.createWorker(queue, wg)
+	err := worker()
+	assert.NoError(t, err)
+
+	assert.Len(t, queue.urls, 1)
+}
+
+func TestWorkerRequestError(t *testing.T) {
+	requester := &mocks.Requester{}
+	requester.On("Request", mock.Anything, willydURL).Return(nil, httpResponseError{
+		statusCode: 500,
+	})
+
+	s := New(WithRequester(requester))
+
+	queue := newURLQueue()
+	queue.Append(willydURL)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+
+	worker := s.createWorker(queue, wg)
+	err := worker()
+	assert.Error(t, err)
+}
+
+func TestRun(t *testing.T) {
+	s := New(
+		WithRoot(willydURL),
+		WithConcurrency(1),
+	)
+	s.worker = concurrency.WorkFunc(func() error {
+		return nil
+	})
+	err := s.Run()
 }

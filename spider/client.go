@@ -17,6 +17,7 @@ func (e httpResponseError) Error() string {
 	return "http response error: " + strconv.Itoa(e.statusCode)
 }
 
+// Requester is something that can make a request.
 type Requester interface {
 	Request(ctx context.Context, uri *url.URL) ([]byte, error)
 }
@@ -34,7 +35,6 @@ func (c client) Request(ctx context.Context, uri *url.URL) ([]byte, error) {
 
 	// Ignore this error as it's not possible to trigger with a valid URL and a constant method.
 	req, _ := http.NewRequest(http.MethodGet, uri.String(), nil)
-
 	req = req.WithContext(ctx)
 	res, err := c.client.Do(req)
 	if err != nil {

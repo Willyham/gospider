@@ -1,4 +1,4 @@
-package spider
+package cmd
 
 import (
 	"net/url"
@@ -7,12 +7,15 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Config holds all configuation needed to start a spider.
 type Config struct {
 	Root         string `mapstructure:"root"`
 	IgnoreRobots bool   `mapstructure:"ignore-robots"`
 	RootURL      *url.URL
 }
 
+// NewConfig creates a config from a deserialized map. Best used with
+// viper.
 func NewConfig(args map[string]interface{}) (*Config, error) {
 	var conf Config
 	err := mapstructure.Decode(args, &conf)
