@@ -3,6 +3,7 @@ package parser
 import (
 	"bytes"
 	"io"
+	"net/url"
 
 	"golang.org/x/net/html"
 )
@@ -24,7 +25,7 @@ const (
 // Results encapsulates data we want out of the parser.
 type Results struct {
 	Assets []string
-	Links  []string
+	Links  []*url.URL
 }
 
 // Parser allows for different parser implementations.
@@ -65,7 +66,11 @@ var ByToken = Func(func(body []byte) (Results, error) {
 				if href == nil {
 					continue
 				}
-				results.Links = append(results.Links, *href)
+				uri, err := url.Parse(*href)
+				if err != nil {
+					continue
+				}
+				results.Links = append(results.Links, uri)
 				continue
 			}
 

@@ -1,14 +1,10 @@
 package spider
 
 import (
+	"fmt"
 	"net/url"
 	"sync"
 )
-
-// Seener is something which can check if a URL has ever been seen.
-type Seener interface {
-	Seen(*url.URL) bool
-}
 
 // urlQueue is a structure which maintains a queue of URLs.
 // it also records a list of all URLs seen and implements the Seener interface.
@@ -17,6 +13,8 @@ type urlQueue struct {
 	seen map[string]bool
 	sync.RWMutex
 }
+
+var _ Seener = new(urlQueue)
 
 func newURLQueue() *urlQueue {
 	return &urlQueue{
@@ -33,6 +31,7 @@ func (q *urlQueue) HasItems() bool {
 func (q *urlQueue) Seen(item *url.URL) bool {
 	q.RLock()
 	_, seen := q.seen[item.String()]
+	fmt.Println("Check seen for ", item.String(), seen)
 	q.RUnlock()
 	return seen
 }

@@ -8,70 +8,37 @@ import (
 	"github.com/Willyham/gospider/spider/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 )
 
-func TestIsExternalURL(t *testing.T) {
-	testURL, err := url.Parse("http://willdemaine.co.uk")
-	require.NoError(t, err)
-
-	cases := []struct {
-		name      string
-		uri       string
-		followSub bool
-		expected  bool
-	}{
-		{"local", "/foo", true, false},
-		{"local no /", "foo", true, false},
-		{"same host", "http://willdemaine.co.uk", false, false},
-		{"path", "http://willdemaine.co.uk/foo", false, false},
-		{"subdomain follow", "http://foo.willdemaine.co.uk", true, false},
-		{"subdomain no follow", "http://foo.willdemaine.co.uk", false, true},
-		{"external", "http://foo.bar.co.uk", false, true},
-		{"external follow", "http://foo.bar.co.uk", true, true},
-	}
-
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			s := New(WithRoot(testURL))
-			s.FollowSubdomains = test.followSub
-
-			parsed, err := url.Parse(test.uri)
-			require.NoError(t, err)
-			assert.Equal(t, test.expected, s.isExternalURL(parsed))
-		})
-	}
-}
-
-func TestFilterURLsToAdd(t *testing.T) {
-	root, err := url.Parse("http://willdemaine.co.uk")
-	require.NoError(t, err)
-	path1, err := url.Parse("http://willdemaine.co.uk/foo")
-	require.NoError(t, err)
-
-	cases := []struct {
-		name     string
-		input    []string
-		expected []*url.URL
-		seener   Seener
-	}{
-		{"empty", []string{}, []*url.URL{}, &urlQueue{}},
-		{"invalid", []string{":"}, []*url.URL{}, &urlQueue{}},
-		{"valid not seen", []string{"http://willdemaine.co.uk/foo"}, []*url.URL{path1}, &urlQueue{}},
-		{"valid and seen", []string{"http://willdemaine.co.uk/foo"}, []*url.URL{}, &urlQueue{
-			seen: map[string]bool{
-				"http://willdemaine.co.uk/foo": true,
-			},
-		}},
-	}
-
-	s := New(WithRoot(root))
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.expected, s.filterURLsToAdd(test.input, test.seener))
-		})
-	}
-}
+// func TestFilterURLsToAdd(t *testing.T) {
+// 	root, err := url.Parse("http://willdemaine.co.uk")
+// 	require.NoError(t, err)
+// 	path1, err := url.Parse("http://willdemaine.co.uk/foo")
+// 	require.NoError(t, err)
+//
+// 	cases := []struct {
+// 		name     string
+// 		input    []string
+// 		expected []*url.URL
+// 		seener   Seener
+// 	}{
+// 		{"empty", []string{}, []*url.URL{}, &urlQueue{}},
+// 		{"invalid", []string{":"}, []*url.URL{}, &urlQueue{}},
+// 		{"valid not seen", []string{"http://willdemaine.co.uk/foo"}, []*url.URL{path1}, &urlQueue{}},
+// 		{"valid and seen", []string{"http://willdemaine.co.uk/foo"}, []*url.URL{}, &urlQueue{
+// 			seen: map[string]bool{
+// 				"http://willdemaine.co.uk/foo": true,
+// 			},
+// 		}},
+// 	}
+//
+// 	s := New(WithRoot(root))
+// 	for _, test := range cases {
+// 		t.Run(test.name, func(t *testing.T) {
+// 			assert.Equal(t, test.expected, s.filterURLsToAdd(test.input, test.seener))
+// 		})
+// 	}
+// }
 
 var willydURL, _ = url.Parse("http://willdemaine.co.uk")
 var willydRobots, _ = url.Parse("http://willdemaine.co.uk/robots.txt")

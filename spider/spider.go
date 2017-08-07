@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -73,7 +72,7 @@ type Spider struct {
 func New(options ...Option) *Spider {
 	logger, _ := zap.NewProduction()
 	spider := &Spider{
-		concurrency:  4,
+		concurrency:  1,
 		ignoreRobots: false,
 		requester: client{
 			logger: logger,
@@ -115,9 +114,7 @@ func (s *Spider) Run() error {
 	return nil
 }
 
-type workerFactory func(queue *urlQueue, wg *sync.WaitGroup) concurrency.WorkFunc
-
-// createWorker creates the worker used in the worker pool. Each worker will poll the URL queue
+// work is the function used by the worker in the pool. Each worker will poll the URL queue
 // for items. If a URL is found, it will collect the links/assets for the URL and report them.
 func (s *Spider) work() error {
 	if !s.queue.HasItems() {
@@ -144,11 +141,19 @@ func (s *Spider) work() error {
 
 	// Add all of the links to follow to the queue.
 	s.logger.Info("Found links", zap.Int("links", len(results.Links)))
-	toAdd := s.filterURLsToAdd(results.Links, s.queue)
+	asAbsolute := createAbsoluteTransformer(s.rootURL)
+	onlyInternal := createIsInternalPredicate(s.rootURL, s.FollowSubdomains)
+	notSeen := createNotSeenPredicate(s.queue)
+
+	absolute := mapURLs(asAbsolute, results.Links)
+	toAdd := filter(
+		notSeen,
+		filter(onlyInternal, absolute),
+	)
+
 	for _, link := range toAdd {
-		fullPath := s.rootURL.ResolveReference(link)
-		s.logger.Info("Enqueing link to fetch", zap.String("url", fullPath.String()))
-		s.queue.Append(s.rootURL.ResolveReference(fullPath))
+		s.logger.Info("Enqueing link to fetch", zap.String("url", link.String()))
+		s.queue.Append(link)
 		s.wg.Add(1)
 	}
 
@@ -172,35 +177,4 @@ func (s *Spider) readRobotsData(root *url.URL) (*robotstxt.RobotsData, error) {
 		return nil, err
 	}
 	return robotstxt.FromBytes(res)
-}
-
-// filterURLsToAdd determines which URLs should be added to the queue for fetching.
-func (s *Spider) filterURLsToAdd(urls []string, seener Seener) []*url.URL {
-	results := make([]*url.URL, 0, len(urls))
-	for _, link := range urls {
-		uri, err := url.Parse(link)
-		if err != nil {
-			s.logger.Info("Skipping invalid url", zap.String("url", link))
-			continue
-		}
-
-		if !s.isExternalURL(uri) && !seener.Seen(uri) {
-			results = append(results, uri)
-		}
-	}
-	return results
-}
-
-// isExternalURL determines if the URL should be counted as 'external'.
-// If the URL has no scheme and host, it's a relative one.
-// In the case that we want to follow subdomains, we check the suffix of the host,
-// otherwise, we check the exact host.
-func (s *Spider) isExternalURL(input *url.URL) bool {
-	if input.Scheme == "" && input.Hostname() == "" {
-		return false
-	}
-	if s.FollowSubdomains {
-		return !strings.HasSuffix(input.Hostname(), s.rootURL.Hostname())
-	}
-	return input.Hostname() != s.rootURL.Hostname()
 }

@@ -35,3 +35,11 @@ func TestMissingAttrs(t *testing.T) {
 	assert.Len(t, results.Assets, 0)
 	assert.Len(t, results.Links, 0)
 }
+
+func TestBadURLs(t *testing.T) {
+	body := []byte(`<a href=":"></a>`)
+	results, err := ByToken(body)
+	assert.NoError(t, err)
+	assert.Len(t, results.Assets, 0)
+	assert.Len(t, results.Links, 0)
+}
