@@ -72,7 +72,7 @@ type Spider struct {
 func New(options ...Option) *Spider {
 	logger, _ := zap.NewProduction()
 	spider := &Spider{
-		concurrency:  1,
+		concurrency:  4,
 		ignoreRobots: false,
 		requester: client{
 			logger: logger,
@@ -117,12 +117,12 @@ func (s *Spider) Run() error {
 // work is the function used by the worker in the pool. Each worker will poll the URL queue
 // for items. If a URL is found, it will collect the links/assets for the URL and report them.
 func (s *Spider) work() error {
-	if !s.queue.HasItems() {
+	next := s.queue.Next()
+	if next == nil {
 		time.Sleep(workerPollInterval)
 		return nil
 	}
-
-	next := s.queue.Next()
+	s.logger.Info("Items left in queue", zap.Int("number", len(s.queue.urls)))
 	defer s.wg.Done()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)

@@ -1,7 +1,6 @@
 package spider
 
 import (
-	"fmt"
 	"net/url"
 	"sync"
 )
@@ -21,26 +20,21 @@ func newURLQueue() *urlQueue {
 		seen: make(map[string]bool),
 	}
 }
-
-func (q *urlQueue) HasItems() bool {
-	q.RLock()
-	defer q.RUnlock()
-	return len(q.urls) > 0
-}
-
 func (q *urlQueue) Seen(item *url.URL) bool {
 	q.RLock()
 	_, seen := q.seen[item.String()]
-	fmt.Println("Check seen for ", item.String(), seen)
 	q.RUnlock()
 	return seen
 }
 
 func (q *urlQueue) Next() *url.URL {
 	q.Lock()
+	defer q.Unlock()
+	if len(q.urls) == 0 {
+		return nil
+	}
 	var next *url.URL
 	next, q.urls = q.urls[len(q.urls)-1], q.urls[:len(q.urls)-1]
-	q.Unlock()
 	return next
 }
 

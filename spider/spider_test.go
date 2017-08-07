@@ -153,11 +153,11 @@ func TestRun(t *testing.T) {
 	)
 
 	s.worker = concurrency.WorkFunc(func() error {
-		if !s.queue.HasItems() {
+		next := s.queue.Next()
+		if next == nil {
 			return nil
 		}
 		defer s.wg.Done()
-		_ = s.queue.Next()
 		return nil
 	})
 	err := s.Run()
@@ -176,11 +176,11 @@ func TestRunRobots(t *testing.T) {
 	)
 
 	s.worker = concurrency.WorkFunc(func() error {
-		if !s.queue.HasItems() {
+		next := s.queue.Next()
+		if next == nil {
 			return nil
 		}
 		defer s.wg.Done()
-		_ = s.queue.Next()
 		return nil
 	})
 	err := s.Run()
