@@ -2,6 +2,7 @@ package spider
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/url"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/Willyham/gospider/spider/internal/concurrency"
 	"github.com/Willyham/gospider/spider/internal/parser"
+	"github.com/Willyham/gospider/spider/reporter"
 	"github.com/temoto/robotstxt"
 )
 
@@ -61,6 +63,7 @@ type Spider struct {
 	rootURL          *url.URL
 
 	requester Requester
+	reporter  reporter.Interface
 	worker    concurrency.Worker
 	logger    *zap.Logger
 	robots    *robotstxt.RobotsData
@@ -72,14 +75,15 @@ type Spider struct {
 func New(options ...Option) *Spider {
 	logger, _ := zap.NewProduction()
 	spider := &Spider{
-		concurrency:  4,
+		concurrency:  10,
 		ignoreRobots: false,
 		requester: client{
 			logger: logger,
 			client: http.DefaultClient,
 		},
-		logger: logger,
-		queue:  newURLQueue(),
+		logger:   logger,
+		queue:    newURLQueue(),
+		reporter: reporter.NewHTML(),
 	}
 	// Default to spider.work, but allow this to be overridden for testing
 	// by having worker as a field on the Spider struct.
@@ -114,6 +118,11 @@ func (s *Spider) Run() error {
 	return nil
 }
 
+// Report writes the report to the writer.
+func (s *Spider) Report(w io.Writer) error {
+	return s.reporter.Report(w)
+}
+
 // work is the function used by the worker in the pool. Each worker will poll the URL queue
 // for items. If a URL is found, it will collect the links/assets for the URL and report them.
 func (s *Spider) work() error {
@@ -139,18 +148,18 @@ func (s *Spider) work() error {
 		return err
 	}
 
-	// Add all of the links to follow to the queue.
-	s.logger.Info("Found links", zap.Int("links", len(results.Links)))
-	asAbsolute := createAbsoluteTransformer(s.rootURL)
 	onlyInternal := createIsInternalPredicate(s.rootURL, s.FollowSubdomains)
+	asAbsolute := createAbsoluteTransformer(s.rootURL)
 	notSeen := createNotSeenPredicate(s.queue)
 
-	absolute := mapURLs(asAbsolute, results.Links)
-	toAdd := filter(
-		notSeen,
-		filter(onlyInternal, absolute),
-	)
+	absoluteLinks := mapURLs(asAbsolute, results.Links)
+	internalLinks := filter(onlyInternal, absoluteLinks)
 
+	// Report all links before we filter out the ones we need to fetch.
+	s.reporter.Add(next, internalLinks, results.Assets)
+	s.logger.Info("Found links", zap.Int("links", len(internalLinks)))
+
+	toAdd := filter(notSeen, internalLinks)
 	for _, link := range toAdd {
 		s.logger.Info("Enqueing link to fetch", zap.String("url", link.String()))
 		s.queue.Append(link)

@@ -22,6 +22,7 @@ package cmd
 
 import (
 	"log"
+	"os"
 
 	"github.com/Willyham/gospider/spider"
 	"github.com/spf13/cobra"
@@ -47,7 +48,7 @@ var startCmd = &cobra.Command{
 		if err != nil {
 			log.Fatal("error running spider: ", err)
 		}
-		return nil
+		return spider.Report(os.Stdout)
 	},
 }
 
