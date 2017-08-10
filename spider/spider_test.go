@@ -3,42 +3,13 @@ package spider
 import (
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/Willyham/gospider/spider/internal/concurrency"
 	"github.com/Willyham/gospider/spider/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
-
-// func TestFilterURLsToAdd(t *testing.T) {
-// 	root, err := url.Parse("http://willdemaine.co.uk")
-// 	require.NoError(t, err)
-// 	path1, err := url.Parse("http://willdemaine.co.uk/foo")
-// 	require.NoError(t, err)
-//
-// 	cases := []struct {
-// 		name     string
-// 		input    []string
-// 		expected []*url.URL
-// 		seener   Seener
-// 	}{
-// 		{"empty", []string{}, []*url.URL{}, &urlQueue{}},
-// 		{"invalid", []string{":"}, []*url.URL{}, &urlQueue{}},
-// 		{"valid not seen", []string{"http://willdemaine.co.uk/foo"}, []*url.URL{path1}, &urlQueue{}},
-// 		{"valid and seen", []string{"http://willdemaine.co.uk/foo"}, []*url.URL{}, &urlQueue{
-// 			seen: map[string]bool{
-// 				"http://willdemaine.co.uk/foo": true,
-// 			},
-// 		}},
-// 	}
-//
-// 	s := New(WithRoot(root))
-// 	for _, test := range cases {
-// 		t.Run(test.name, func(t *testing.T) {
-// 			assert.Equal(t, test.expected, s.filterURLsToAdd(test.input, test.seener))
-// 		})
-// 	}
-// }
 
 var willydURL, _ = url.Parse("http://willdemaine.co.uk")
 var willydRobots, _ = url.Parse("http://willdemaine.co.uk/robots.txt")
@@ -51,7 +22,10 @@ func TestReadRobotsData(t *testing.T) {
 		Disallow: /bar/
 	`), nil)
 
-	s := New(WithRequester(requester))
+	s := New(
+		WithRoot(willydURL),
+		WithRequester(requester),
+	)
 
 	data, err := s.readRobotsData(willydURL)
 	assert.NoError(t, err)
@@ -62,13 +36,22 @@ func TestReadRobotsData(t *testing.T) {
 	assert.True(t, data.TestAgent("/asdf", "Agent"))
 }
 
+func TestNoRoot(t *testing.T) {
+	assert.Panics(t, func() {
+		New()
+	})
+}
+
 func TestReadRobotsDataHTTPError(t *testing.T) {
 	requester := &mocks.Requester{}
 	requester.On("Request", mock.Anything, willydRobots).Return([]byte{}, httpResponseError{
 		statusCode: 500,
 	})
 
-	s := New(WithRequester(requester))
+	s := New(
+		WithRoot(willydURL),
+		WithRequester(requester),
+	)
 
 	data, err := s.readRobotsData(willydURL)
 	assert.NoError(t, err)
@@ -79,7 +62,10 @@ func TestReadRobotsDataError(t *testing.T) {
 	requester := &mocks.Requester{}
 	requester.On("Request", mock.Anything, willydRobots).Return([]byte{}, assert.AnError)
 
-	s := New(WithRequester(requester))
+	s := New(
+		WithRoot(willydURL),
+		WithRequester(requester),
+	)
 
 	_, err := s.readRobotsData(willydURL)
 	assert.Error(t, err)
@@ -91,7 +77,10 @@ func TestReadRobotsDataMissing(t *testing.T) {
 		statusCode: 404,
 	})
 
-	s := New(WithRequester(requester))
+	s := New(
+		WithRoot(willydURL),
+		WithRequester(requester),
+	)
 
 	data, err := s.readRobotsData(willydURL)
 	assert.NoError(t, err)
@@ -116,6 +105,7 @@ func TestWorker(t *testing.T) {
 		WithRequester(requester),
 		WithConcurrency(1),
 		WithIgnoreRobots(false),
+		WithTimeout(time.Minute),
 	)
 	s.queue.Append(willydURL)
 

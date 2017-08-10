@@ -19,7 +19,8 @@ const (
 // In this implementation, jobs are essentially tokens to perform some work. Jobs are not delivered
 // to the pool, but instead 'claimed' by a worker, and 'returned' when finished (technically, a new job
 // is posted to the queue). In this case, the worker itself is the one which determines the work it should do.
-// This gives a lot of flexibility when combined with implementations of Worker.
+// This gives a lot of flexibility when combined with implementations of Worker, and maintains a generic
+// but type safe implementation.
 //
 // It uses a number of channels to control the concurrency:
 // - jobs is a buffered channel that signals that a worker should process a job

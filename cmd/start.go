@@ -23,6 +23,7 @@ package cmd
 import (
 	"log"
 	"os"
+	"time"
 
 	"github.com/Willyham/gospider/spider"
 	"github.com/spf13/cobra"
@@ -42,6 +43,8 @@ var startCmd = &cobra.Command{
 		spider := spider.New(
 			spider.WithRoot(conf.RootURL),
 			spider.WithIgnoreRobots(conf.IgnoreRobots),
+			spider.WithConcurrency(conf.Concurrency),
+			spider.WithTimeout(conf.Timeout),
 		)
 
 		err = spider.Run()
@@ -57,7 +60,15 @@ func init() {
 
 	startCmd.Flags().StringP("root", "r", "", "Root URL to spider from")
 	startCmd.Flags().BoolP("ignore-robots", "i", false, "Ignore robots.txt")
+	startCmd.Flags().IntP("concurrency", "c", 1, "number of workers to fetch with")
+	startCmd.Flags().DurationP("timeout", "t", time.Second*5, "request timeout")
 
-	viper.BindPFlag("root", startCmd.Flags().Lookup("root"))
-	viper.BindPFlag("ignore-robots", startCmd.Flags().Lookup("ignore-robots"))
+	bind := func(flag string) {
+		viper.BindPFlag(flag, startCmd.Flags().Lookup(flag))
+	}
+
+	bind("root")
+	bind("ignore-robots")
+	bind("concurrency")
+	bind("timeout")
 }

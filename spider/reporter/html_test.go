@@ -2,7 +2,6 @@ package reporter
 
 import (
 	"bytes"
-	"fmt"
 	"net/url"
 	"testing"
 
@@ -10,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestReport(t *testing.T) {
+func TestReportHTML(t *testing.T) {
 	root, err := url.Parse("http://willdemaine.co.uk")
 	require.NoError(t, err)
 
@@ -28,6 +27,4 @@ func TestReport(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	err = r.Report(buf)
 	assert.NoError(t, err)
-
-	fmt.Println(buf)
 }

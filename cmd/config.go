@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"net/url"
+	"time"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
@@ -9,8 +10,10 @@ import (
 
 // Config holds all configuation needed to start a spider.
 type Config struct {
-	Root         string `mapstructure:"root"`
-	IgnoreRobots bool   `mapstructure:"ignore-robots"`
+	Root         string        `mapstructure:"root"`
+	IgnoreRobots bool          `mapstructure:"ignore-robots"`
+	Concurrency  int           `mapstructure:"concurrency"`
+	Timeout      time.Duration `mapstructure:"timeout"`
 	RootURL      *url.URL
 }
 
@@ -18,7 +21,15 @@ type Config struct {
 // viper.
 func NewConfig(args map[string]interface{}) (*Config, error) {
 	var conf Config
-	err := mapstructure.Decode(args, &conf)
+	dec, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		DecodeHook: mapstructure.StringToTimeDurationHookFunc(),
+		Result:     &conf,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	err = dec.Decode(args)
 	if err != nil {
 		return nil, err
 	}

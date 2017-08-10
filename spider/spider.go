@@ -54,13 +54,21 @@ func WithRequester(req Requester) Option {
 	}
 }
 
+// WithTimeout sets the request timeout.
+func WithTimeout(dur time.Duration) Option {
+	return func(s *Spider) {
+		s.requestTimeout = dur
+	}
+}
+
 // Spider can run requests against a URI until it sees every internal page on that site
 // at least once. It can be configued with Option arguments which override defaults.
 type Spider struct {
 	ignoreRobots     bool
-	FollowSubdomains bool
+	followSubdomains bool
 	concurrency      int
 	rootURL          *url.URL
+	requestTimeout   time.Duration
 
 	requester Requester
 	reporter  reporter.Interface
@@ -75,8 +83,9 @@ type Spider struct {
 func New(options ...Option) *Spider {
 	logger, _ := zap.NewProduction()
 	spider := &Spider{
-		concurrency:  10,
-		ignoreRobots: false,
+		concurrency:    1,
+		ignoreRobots:   false,
+		requestTimeout: time.Second * 5,
 		requester: client{
 			logger: logger,
 			client: http.DefaultClient,
@@ -91,6 +100,11 @@ func New(options ...Option) *Spider {
 	for _, op := range options {
 		op(spider)
 	}
+
+	if spider.rootURL == nil {
+		panic("must supply a root URL")
+	}
+
 	return spider
 }
 
@@ -134,7 +148,7 @@ func (s *Spider) work() error {
 	s.logger.Info("Items left in queue", zap.Int("number", len(s.queue.urls)))
 	defer s.wg.Done()
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	ctx, cancel := context.WithTimeout(context.Background(), s.requestTimeout)
 	defer cancel()
 
 	body, err := s.requester.Request(ctx, next)
@@ -148,7 +162,7 @@ func (s *Spider) work() error {
 		return err
 	}
 
-	onlyInternal := createIsInternalPredicate(s.rootURL, s.FollowSubdomains)
+	onlyInternal := createIsInternalPredicate(s.rootURL, s.followSubdomains)
 	asAbsolute := createAbsoluteTransformer(s.rootURL)
 	notSeen := createNotSeenPredicate(s.queue)
 
@@ -174,7 +188,7 @@ func (s *Spider) work() error {
 // we assume it is disallowed.
 func (s *Spider) readRobotsData(root *url.URL) (*robotstxt.RobotsData, error) {
 	robotsURL := root.ResolveReference(robotsTxt)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	ctx, cancel := context.WithTimeout(context.Background(), s.requestTimeout)
 	defer cancel()
 
 	res, err := s.requester.Request(ctx, robotsURL)
