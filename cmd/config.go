@@ -35,8 +35,11 @@ func NewConfig(args map[string]interface{}) (*Config, error) {
 	}
 
 	rootURL, err := url.Parse(conf.Root)
-	if err != nil || rootURL.Scheme == "" || rootURL.Hostname() == "" {
+	if err != nil {
 		return nil, errors.Wrap(err, "invalid root URL")
+	}
+	if rootURL.Scheme == "" || rootURL.Hostname() == "" {
+		return nil, errors.New("invalid root URL")
 	}
 	conf.RootURL = rootURL
 
