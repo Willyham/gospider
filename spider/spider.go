@@ -21,7 +21,7 @@ const (
 	userAgent          = "gospider/v1.0"
 )
 
-var robotsTxt, _ = url.Parse("/robots.txt")
+var robotsTxtPath, _ = url.Parse("/robots.txt")
 
 // Option is a function that configures the spider.
 type Option func(*Spider)
@@ -176,6 +176,7 @@ func (s *Spider) work() error {
 	onlyInternal := createIsInternalPredicate(s.rootURL, s.followSubdomains)
 	asAbsolute := createAbsoluteTransformer(s.rootURL)
 	notSeen := createNotSeenPredicate(s.queue)
+	allowedByRobots := createShouldRequestByRobotsPredicate(s.userAgent, s.robots)
 
 	absoluteLinks := mapURLs(asAbsolute, results.Links)
 	internalLinks := filter(onlyInternal, absoluteLinks)
@@ -184,7 +185,10 @@ func (s *Spider) work() error {
 	s.reporter.Add(next, internalLinks, results.Assets)
 	s.logger.Info("Found links", zap.Int("links", len(internalLinks)))
 
-	toAdd := filter(notSeen, internalLinks)
+	// Filter out links that we've already seen or that aren't allowed by the robots.txt file.
+	toAdd := filter(allowedByRobots,
+		filter(notSeen, internalLinks),
+	)
 	for _, link := range toAdd {
 		s.logger.Info("Enqueing link to fetch", zap.String("url", link.String()))
 		s.queue.Append(link)
@@ -198,7 +202,7 @@ func (s *Spider) work() error {
 // In the event of a 4XX, we assume crawling is allowed. In the event of a 5XX,
 // we assume it is disallowed.
 func (s *Spider) readRobotsData(root *url.URL) (*robotstxt.RobotsData, error) {
-	robotsURL := root.ResolveReference(robotsTxt)
+	robotsURL := root.ResolveReference(robotsTxtPath)
 	ctx, cancel := context.WithTimeout(context.Background(), s.requestTimeout)
 	defer cancel()
 

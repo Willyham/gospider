@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/temoto/robotstxt"
 )
 
 func TestIsInternalURLPredicate(t *testing.T) {
@@ -69,4 +70,49 @@ func TestNotSeenPredicate(t *testing.T) {
 			assert.Equal(t, test.expected, pred(parsed))
 		})
 	}
+}
+
+func TestShoudRequestByRobotsPredicate(t *testing.T) {
+	robots, err := robotstxt.FromStatusAndString(200, `
+		User-agent: agent
+		Allow: /foo/
+		Disallow: /bar/
+	`)
+	require.NoError(t, err)
+
+	cases := []struct {
+		name     string
+		agent    string
+		path     string
+		expected bool
+	}{
+		{"agent allow path", "agent", "/foo/123", true},
+		{"agent disallow path", "agent", "/bar/123", false},
+		{"wrong agent allow path", "foo", "/foo/123", true},
+		{"wrong agent disallow path", "foo", "/bar/123", true},
+	}
+
+	fooCom, err := url.Parse("http://foo.com")
+	require.NoError(t, err)
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			predicate := createShouldRequestByRobotsPredicate(test.agent, robots)
+
+			parsed, err := url.Parse(test.path)
+			require.NoError(t, err)
+
+			finalURL := fooCom.ResolveReference(parsed)
+			res := predicate(finalURL)
+			assert.Equal(t, test.expected, res)
+		})
+	}
+}
+
+func TestShouldRequestByRobotsNil(t *testing.T) {
+	predicate := createShouldRequestByRobotsPredicate("foo", nil)
+	fooURL, err := url.Parse("/foo")
+	require.NoError(t, err)
+
+	assert.True(t, predicate(fooURL))
 }

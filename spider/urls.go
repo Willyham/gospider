@@ -3,6 +3,8 @@ package spider
 import (
 	"net/url"
 	"strings"
+
+	"github.com/temoto/robotstxt"
 )
 
 // Seener is something which can check if a URL has ever been seen.
@@ -45,6 +47,17 @@ func createIsInternalPredicate(root *url.URL, followSubdomains bool) urlPredicat
 func createNotSeenPredicate(seener Seener) urlPredicate {
 	return func(input *url.URL) bool {
 		return !seener.Seen(input)
+	}
+}
+
+// createShouldRequestByRobotsPredicate creates a predicate which tests if we should follow
+// a URL based on the info from the robots.txt.
+func createShouldRequestByRobotsPredicate(ua string, r *robotstxt.RobotsData) urlPredicate {
+	return func(input *url.URL) bool {
+		if r == nil {
+			return true
+		}
+		return r.TestAgent(input.Path, ua)
 	}
 }
 
