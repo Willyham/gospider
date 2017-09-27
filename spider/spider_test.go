@@ -25,6 +25,7 @@ func TestReadRobotsData(t *testing.T) {
 	s := New(
 		WithRoot(willydURL),
 		WithRequester(requester),
+		WithUserAgent("agent"),
 	)
 
 	data, err := s.readRobotsData(willydURL)

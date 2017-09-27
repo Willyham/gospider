@@ -18,6 +18,7 @@ import (
 
 const (
 	workerPollInterval = time.Millisecond * 100
+	userAgent          = "gospider/v1.0"
 )
 
 var robotsTxt, _ = url.Parse("/robots.txt")
@@ -61,6 +62,13 @@ func WithTimeout(dur time.Duration) Option {
 	}
 }
 
+// WithUserAgent overwrites the default user agent.
+func WithUserAgent(agent string) Option {
+	return func(s *Spider) {
+		s.userAgent = agent
+	}
+}
+
 // Spider can run requests against a URI until it sees every internal page on that site
 // at least once. It can be configued with Option arguments which override defaults.
 type Spider struct {
@@ -69,6 +77,7 @@ type Spider struct {
 	concurrency      int
 	rootURL          *url.URL
 	requestTimeout   time.Duration
+	userAgent        string
 
 	requester Requester
 	reporter  reporter.Interface
@@ -86,6 +95,7 @@ func New(options ...Option) *Spider {
 		concurrency:    1,
 		ignoreRobots:   false,
 		requestTimeout: time.Second * 5,
+		userAgent:      userAgent,
 		requester: client{
 			logger: logger,
 			client: http.DefaultClient,
@@ -162,6 +172,7 @@ func (s *Spider) work() error {
 		return err
 	}
 
+	// TODO: Move these predicates out of the work function
 	onlyInternal := createIsInternalPredicate(s.rootURL, s.followSubdomains)
 	asAbsolute := createAbsoluteTransformer(s.rootURL)
 	notSeen := createNotSeenPredicate(s.queue)

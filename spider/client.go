@@ -22,13 +22,19 @@ func (e httpResponseError) Error() string {
 // Requester is something that can make a request.
 type Requester interface {
 	Request(ctx context.Context, uri *url.URL) ([]byte, error)
+	SetUserAgent(agent string)
 }
 
 //go:generate mockery -name Requester -case underscore
 
 type client struct {
-	client *http.Client
-	logger *zap.Logger
+	client    *http.Client
+	logger    *zap.Logger
+	userAgent string
+}
+
+func (c client) SetUserAgent(agent string) {
+	c.userAgent = agent
 }
 
 func (c client) Request(ctx context.Context, uri *url.URL) ([]byte, error) {
@@ -40,6 +46,8 @@ func (c client) Request(ctx context.Context, uri *url.URL) ([]byte, error) {
 	// Ignore this error as it's not possible to trigger with a valid URL and a constant method.
 	req, _ := http.NewRequest(http.MethodGet, uri.String(), nil)
 	req = req.WithContext(ctx)
+	req.Header.Set("User-Agent", c.userAgent)
+
 	res, err := c.client.Do(req)
 	if err != nil {
 		return nil, err

@@ -17,6 +17,7 @@ import (
 func TestRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "Foo")
+		assert.Equal(t, "foo", r.Header.Get("User-Agent"))
 	}))
 	defer server.Close()
 
@@ -24,8 +25,9 @@ func TestRequest(t *testing.T) {
 	require.NoError(t, err)
 
 	c := client{
-		client: http.DefaultClient,
-		logger: zap.NewNop(),
+		client:    http.DefaultClient,
+		logger:    zap.NewNop(),
+		userAgent: "foo",
 	}
 	res, err := c.Request(context.Background(), uri)
 	assert.NoError(t, err)

@@ -32,3 +32,8 @@ func (_m *Requester) Request(ctx context.Context, uri *url.URL) ([]byte, error) 
 
 	return r0, r1
 }
+
+// SetUserAgent provides a mock function with given fields: agent
+func (_m *Requester) SetUserAgent(agent string) {
+	_m.Called(agent)
+}
