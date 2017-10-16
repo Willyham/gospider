@@ -4,7 +4,7 @@
 
 ## Usage
 
-    glide install
+    make install
 
 `gospider` is designed to be used either from the CLI or in code.
 
@@ -23,7 +23,7 @@ Use `gospider --help` for more options.
 the `spider.New` function follows the functional options pattern. The only parameter which is required
 is the root URL - all others will be defaulted to sensible values if not supplied.
 
-```
+```golang
 uri, _ := url.Parse("http://foo.bar/")
 
 spider := spider.New(
@@ -45,7 +45,7 @@ return spider.Report(os.Stdout)
 or reporter can be used by supplying a struct which implements the `Requester` or `Reporter` interface. For example,
 to make requests through a proxy you could do:
 
-```
+```golang
 type proxyRequester struct {
   client *http.Client
 }
